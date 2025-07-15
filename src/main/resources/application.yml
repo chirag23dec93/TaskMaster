@@ -1,0 +1,75 @@
+logging:
+  level:
+    org.springframework.security: DEBUG
+    com:
+      airtribe:
+        TaskMaster:
+          security:
+              JwtAuthenticationFilter: DEBUG
+    root: INFO
+    org.springframework.web.socket: TRACE
+    org.springframework.messaging: TRACE
+
+spring:
+  application:
+    name: TaskMaster
+  mvc:
+     async:
+      request-timeout: 30000
+
+  datasource:
+        url: jdbc:mysql://localhost:3306/taskmaster?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+        username: taskuser
+        password: Secret123!
+  jpa:
+        database-platform: org.hibernate.dialect.MySQL8Dialect
+        hibernate:
+          ddl-auto: update
+        show-sql: true
+        properties:
+          hibernate:
+            format_sql: true
+#  datasource:
+#    url: jdbc:postgresql://localhost:5432/teamflow
+#    username: teamflow_user
+#    password: secret
+#  jpa:
+#    hibernate:
+#      ddl-auto: update
+#    show-sql: true
+#    properties:
+#      hibernate:
+##        format_sql: true
+#  datasource:
+#    url: jdbc:h2:mem:teamflow;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=false
+#    driver-class-name: org.h2.Driver
+#    username: sa
+#    password:
+#  jpa:
+#    database-platform: org.hibernate.dialect.H2Dialect
+#    hibernate:
+#      ddl-auto: update
+#    show-sql: true
+#    properties:
+#      hibernate:
+#        format_sql: true
+#  h2:
+#    console:
+#      enabled: true
+#      path: /h2-console
+
+security:
+  jwt:
+    secret: Tp6lwHsTVJ46bzn3D4L1TwXNH30qRbmxZ3nGlfsCc4U=
+    expiration: 3600000  # 1 hour in ms
+
+# huggingface:
+#   api:
+#     url: https://api-inference.huggingface.co/models/gpt2
+#     token: ${HUGGINGFACE_API_TOKEN}
+
+file:
+  upload-dir: uploads/
+
+server:
+  port: 8080

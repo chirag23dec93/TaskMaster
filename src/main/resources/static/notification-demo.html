@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TaskMaster Notifications Demo</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        .panel {
+            border: 1px solid #ccc;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background-color: #fff;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .form-group input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 200px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 5px;
+        }
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background-color: #545b62;
+        }
+        .user-list {
+            list-style: none;
+            padding: 0;
+        }
+        .user-list li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>TaskMaster Notifications Demo</h1>
+        
+        <!-- Login Panel -->
+        <div class="panel" id="loginPanel">
+            <h2>Login</h2>
+            <div class="form-group">
+                <label>Username:</label>
+                <input type="text" id="username" />
+            </div>
+            <div class="form-group">
+                <label>Password:</label>
+                <input type="password" id="password" />
+            </div>
+            <button class="btn btn-primary" onclick="login()">Login</button>
+            <div id="loginStatus"></div>
+        </div>
+
+        <!-- User List Panel -->
+        <div class="panel" id="userListPanel" style="display: none;">
+            <h2>Logged In Users</h2>
+            <ul class="user-list" id="userList"></ul>
+        </div>
+    </div>
+
+    <script>
+        // Store logged in users and their tokens
+        const loggedInUsers = new Map();
+
+        function updateStatus(elementId, message, isError = false) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = isError ? 'error' : 'success';
+        }
+
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Login failed');
+                }
+
+                const data = await response.json();
+                console.log('Login response:', data);
+                
+                if (!data.token || !data.userId) {
+                    throw new Error('Invalid server response: missing token or userId');
+                }
+                
+                // Store user data
+                loggedInUsers.set(username, {
+                    token: data.token,
+                    userId: data.userId
+                });
+                
+                console.log('Stored user data for:', username, loggedInUsers.get(username));
+
+                // Update UI
+                updateStatus('loginStatus', 'Logged in successfully');
+                document.getElementById('username').value = '';
+                document.getElementById('password').value = '';
+                
+                // Show user list panel
+                document.getElementById('userListPanel').style.display = 'block';
+                updateUserList();
+            } catch (error) {
+                updateStatus('loginStatus', `Login failed: ${error.message}`, true);
+            }
+        }
+
+        function updateUserList() {
+            const userList = document.getElementById('userList');
+            userList.innerHTML = '';
+            
+            loggedInUsers.forEach((userData, username) => {
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    <span>${username}</span>
+                    <button class="btn btn-primary" onclick="openNotifications('${username}')">Show Notifications</button>
+                `;
+                userList.appendChild(li);
+            });
+        }
+
+        function openNotifications(username) {
+            const userData = loggedInUsers.get(username);
+            if (!userData) return;
+
+            // Store user data in sessionStorage for the new tab
+            const notificationData = {
+                username: username,
+                token: userData.token,
+                userId: userData.userId
+            };
+            sessionStorage.setItem('notificationData', JSON.stringify(notificationData));
+
+            // Open notifications in new tab
+            window.open('/notification-stream.html', '_blank');
+        }
+
+        // No cleanup needed on main page unload since we want to persist the session data
+    </script>
+</body>
+</html>

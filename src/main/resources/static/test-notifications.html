@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Notification Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        .log { font-family: monospace; margin: 5px 0; }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h2>WebSocket Notification Test</h2>
+    <div>
+        <h3>Connection Status: <span id="status">Disconnected</span></h3>
+        <input type="text" id="jwt" placeholder="Enter your JWT token" style="width: 300px"/>
+        <button onclick="connect()">Connect</button>
+        <button onclick="disconnect()">Disconnect</button>
+    </div>
+    <div>
+        <h3>Debug Log:</h3>
+        <div id="debug"></div>
+    </div>
+    <div>
+        <h3>Notifications:</h3>
+        <ul id="notifications"></ul>
+    </div>
+
+    <script>
+        let stompClient = null;
+        let userId = null;
+
+        function addLog(message, isError = false) {
+            const debugDiv = document.getElementById('debug');
+            const log = document.createElement('div');
+            log.className = 'log ' + (isError ? 'error' : 'success');
+            log.textContent = new Date().toLocaleTimeString() + ' - ' + message;
+            debugDiv.insertBefore(log, debugDiv.firstChild);
+        }
+
+        function parseJwt(token) {
+            try {
+                const base64Url = token.split('.')[1];
+                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                }).join(''));
+                return JSON.parse(jsonPayload);
+            } catch (e) {
+                addLog('Error parsing JWT: ' + e, true);
+                return null;
+            }
+        }
+
+        function connect() {
+            const jwt = document.getElementById('jwt').value;
+            if (!jwt) {
+                alert('Please enter a JWT token');
+                return;
+            }
+
+            // Parse JWT to get user information
+            const jwtPayload = parseJwt(jwt);
+            if (!jwtPayload) {
+                alert('Invalid JWT token');
+                return;
+            }
+
+            const username = jwtPayload.sub; // or however you store the username in your JWT
+            addLog('Username from JWT: ' + username);
+
+            addLog('Creating WebSocket connection...');
+            
+            // Create SockJS and STOMP client
+            const socket = new SockJS('/ws');
+            stompClient = Stomp.over(socket);
+
+            // Enable debug logging
+            stompClient.debug = function(str) {
+                addLog(str);
+            };
+
+            // Configure STOMP client
+            stompClient.reconnect_delay = 5000;
+            stompClient.heartbeat.outgoing = 10000;
+            stompClient.heartbeat.incoming = 10000;
+
+            // Handle WebSocket errors
+            socket.onerror = function(error) {
+                addLog('WebSocket Error: ' + error, true);
+            };
+
+            socket.onclose = function(event) {
+                if (!event.wasClean) {
+                    addLog('WebSocket connection lost. Code: ' + event.code + ' Reason: ' + event.reason, true);
+                    setTimeout(function() {
+                        addLog('Attempting to reconnect...');
+                        connect();
+                    }, 5000);
+                }
+            };
+
+            // Add JWT token and other headers
+            const headers = {
+                'Authorization': 'Bearer ' + jwt,
+                'heart-beat': '10000,10000',
+                'accept-version': '1.1,1.0',
+                'client-id': 'test-client-' + new Date().getTime()
+            };
+
+            addLog('Connecting with headers: ' + JSON.stringify(headers));
+
+            stompClient.connect(headers, 
+                function(frame) {
+                    document.getElementById('status').textContent = 'Connected';
+                    addLog('Connected: ' + frame);
+
+                    // Get user ID from JWT
+                    const jwtData = parseJwt(jwt);
+                    addLog('JWT payload: ' + JSON.stringify(jwtData));
+                    
+                    // Get user info from JWT
+                    const username = jwtData.sub;
+                    const userId = jwtData.userId;
+                    
+                    if (!userId) {
+                        addLog('Error: No user ID found in JWT', true);
+                        disconnect();
+                        return;
+                    }
+                    
+                    addLog('User info - ID: ' + userId + ', Username: ' + username);
+
+                    // Subscribe to notifications topic
+                    const topicPath = '/topic/notifications';
+                    addLog('Subscribing to topic: ' + topicPath);
+                    
+                    stompClient.subscribe(topicPath, 
+                        function(notification) {
+                            addLog('Received message: ' + notification.body);
+                            try {
+                                const message = JSON.parse(notification.body);
+                                // Only show notifications for this user
+                                if (message.userId === userId) {
+                                    addLog('Notification matches user ID, displaying...');
+                                    showNotification(message);
+                                } else {
+                                    addLog('Notification not for this user (ID: ' + userId + ', message for: ' + message.userId + ')');
+                                }
+                            } catch (e) {
+                                addLog('Error parsing message: ' + e.message, true);
+                            }
+                        },
+                        { 'Authorization': 'Bearer ' + jwt }
+                    );
+                }, 
+                function(error) {
+                    addLog('Error: ' + error, true);
+                    document.getElementById('status').textContent = 'Error: ' + error;
+                }
+            );
+        }
+
+        function disconnect() {
+            if (stompClient !== null) {
+                try {
+                    stompClient.disconnect(function() {
+                        document.getElementById('status').textContent = 'Disconnected';
+                        addLog('Disconnected cleanly');
+                        stompClient = null;
+                    });
+                } catch (error) {
+                    addLog('Error during disconnect: ' + error, true);
+                    document.getElementById('status').textContent = 'Connection Error';
+                    stompClient = null;
+                }
+            }
+        }
+
+        function showNotification(notification) {
+            try {
+                const notificationsList = document.getElementById('notifications');
+                const li = document.createElement('li');
+                
+                // Format the timestamp if it exists
+                const timestamp = notification.timestamp ? 
+                    new Date(notification.timestamp).toLocaleTimeString() : 
+                    new Date().toLocaleTimeString();
+                
+                // Create notification text based on available fields
+                const text = notification.message || 
+                    (typeof notification === 'string' ? notification : JSON.stringify(notification));
+                
+                li.textContent = `${timestamp} - ${text}`;
+                notificationsList.insertBefore(li, notificationsList.firstChild);
+                addLog('Received notification: ' + JSON.stringify(notification));
+            } catch (error) {
+                addLog('Error processing notification: ' + error.message, true);
+                console.error('Error processing notification:', error);
+            }
+        }
+
+        // Handle page unload
+        window.onbeforeunload = function() {
+            if (stompClient !== null) {
+                disconnect();
+            }
+        };
+    </script>
+</body>
+</html>

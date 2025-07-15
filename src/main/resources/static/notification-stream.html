@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TaskMaster Notifications Stream</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+    <style>
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        .notification {
+            background-color: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .notification.unread {
+            background-color: #e7f5ff;
+            border-left-color: #339af0;
+        }
+        .notification .time {
+            color: #666;
+            font-size: 0.85em;
+        }
+        .notification .title {
+            font-weight: bold;
+            color: #333;
+            margin: 5px 0;
+        }
+        .notification .message {
+            margin: 8px 0;
+            color: #444;
+        }
+        .notification .meta {
+            font-size: 0.85em;
+            color: #666;
+            display: flex;
+            gap: 15px;
+        }
+        .status-bar {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .status-bar .user-info {
+            font-weight: bold;
+        }
+        .status-bar .connection-status {
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 0.9em;
+        }
+        .status-bar .connection-status.connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status-bar .connection-status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .error {
+            color: #721c24;
+            background-color: #f8d7da;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="status-bar">
+            <div class="user-info" id="userInfo"></div>
+            <div class="connection-status" id="connectionStatus">Connecting...</div>
+        </div>
+        
+        <div id="error" style="display: none;"></div>
+        <div id="notifications"></div>
+    </div>
+
+    <script>
+        let stompClient = null;
+        let userData = null;
+
+        // Initialize from session storage
+        function initialize() {
+            const storedData = sessionStorage.getItem('notificationData');
+            if (!storedData) {
+                showError('No user data found. Please return to the main page and try again.');
+                return false;
+            }
+
+            try {
+                userData = JSON.parse(storedData);
+                document.getElementById('userInfo').textContent = `Notifications for: ${userData.username}`;
+                return true;
+            } catch (error) {
+                showError('Invalid user data. Please return to the main page and try again.');
+                return false;
+            }
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        function updateConnectionStatus(connected) {
+            const statusDiv = document.getElementById('connectionStatus');
+            if (connected) {
+                statusDiv.textContent = 'Connected';
+                statusDiv.className = 'connection-status connected';
+            } else {
+                statusDiv.textContent = 'Disconnected';
+                statusDiv.className = 'connection-status disconnected';
+            }
+        }
+
+        function connect() {
+            if (!userData) {
+                console.error('No user data available');
+                return;
+            }
+
+            console.log('Connecting with user data:', { 
+                username: userData.username,
+                userId: userData.userId
+            });
+
+            const socket = new SockJS('/ws');
+            stompClient = Stomp.over(socket);
+            stompClient.debug = function(str) {
+                console.log('STOMP: ' + str);
+            };
+
+            const headers = { 
+                'Authorization': `Bearer ${userData.token}`,
+                'X-User-Id': userData.userId  // Add user ID to headers for debugging
+            };
+            console.log('Connection headers:', headers);
+
+            stompClient.connect(headers, 
+                function(frame) {
+                    console.log('Connected: ' + frame);
+                    updateConnectionStatus(true);
+
+                    // Subscribe to user-specific topic
+                    const userTopic = `/user/${userData.userId}/notifications`;
+                    console.log('Subscribing to:', userTopic);
+                    
+                    const subscription = stompClient.subscribe(userTopic,
+                        function(notification) {
+                            console.log('Received notification on topic:', userTopic);
+                            console.log('Raw notification:', notification);
+                            try {
+                                const message = JSON.parse(notification.body);
+                                console.log('Parsed message:', message);
+                                console.log('Comparing user IDs - Message:', message.userId, 'Current:', userData.userId);
+                                
+                                if (message.userId === userData.userId) {
+                                    console.log('User ID match, showing notification');
+                                    showNotification(message);
+                                } else {
+                                    console.log('User ID mismatch, ignoring notification');
+                                }
+                            } catch (error) {
+                                console.error('Error processing notification:', error);
+                                console.error('Raw notification body:', notification.body);
+                                showError('Error processing notification');
+                            }
+                        },
+                        headers // Use the connection headers for subscription
+                    );
+
+                    console.log('Subscription created:', subscription);
+                    console.log('Listening for notifications on:', userTopic);
+                    console.log('With user ID:', userData.userId);
+                },
+                function(error) {
+                    console.error('Connection error:', error);
+                    console.error('Connection details:', {
+                        url: socket._transport.url,
+                        headers: headers
+                    });
+                    updateConnectionStatus(false);
+                    showError(`Connection failed: ${error}`);
+                    // Try to reconnect after 5 seconds
+                    setTimeout(connect, 5000);
+                }
+            );
+        }
+
+        function showNotification(notification) {
+            const container = document.getElementById('notifications');
+            const div = document.createElement('div');
+            div.className = `notification ${notification.read ? '' : 'unread'}`;
+            
+            const time = new Date(notification.timestamp).toLocaleString();
+            
+            div.innerHTML = `
+                <div class="time">${time}</div>
+                <div class="title">${notification.taskTitle || 'Task Update'}</div>
+                <div class="message">${notification.message}</div>
+                <div class="meta">
+                    <span>Status: ${notification.taskStatus}</span>
+                    <span>Priority: ${notification.taskPriority}</span>
+                </div>
+            `;
+            
+            container.insertBefore(div, container.firstChild);
+        }
+
+        // Initialize and connect
+        if (initialize()) {
+            connect();
+        }
+
+        // Clean up on page unload
+        window.onbeforeunload = function() {
+            if (stompClient) {
+                stompClient.disconnect();
+            }
+            // Only remove the session data if this is the last notification tab
+            const allWindows = window.opener.loggedInUsers.size;
+            const currentTabs = sessionStorage.getItem('notificationTabCount') || '0';
+            const remainingTabs = parseInt(currentTabs) - 1;
+            
+            if (remainingTabs <= 0) {
+                sessionStorage.removeItem('notificationData');
+            } else {
+                sessionStorage.setItem('notificationTabCount', remainingTabs.toString());
+            }
+        };
+
+        // Track number of notification tabs
+        const currentTabs = parseInt(sessionStorage.getItem('notificationTabCount') || '0');
+        sessionStorage.setItem('notificationTabCount', (currentTabs + 1).toString());
+    </script>
+</body>
+</html>
